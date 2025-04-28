@@ -141,3 +141,30 @@ def control_audio_player(hand):
     if isLoveU(hand):
         t="Equalizer"
     return t
+
+
+def handleVolume(hand):
+    if(isThumbBent(hand) and not isPalmFingerBent(hand,name="index") and isPalmFingerBent(hand,name="middle") and isPalmFingerBent(hand,name="ring") and isPalmFingerBent(hand,name="pinky")):
+        return True
+    return False
+
+def handlePitch(hand):
+    if(isThumbBent(hand) and not isPalmFingerBent(hand,name="index") and not isPalmFingerBent(hand,name="middle") and isPalmFingerBent(hand,name="ring") and isPalmFingerBent(hand,name="pinky")):
+        return True
+    return False
+
+def handleSpeed(hand):
+    if(isThumbBent(hand) and not isPalmFingerBent(hand,name="index") and not isPalmFingerBent(hand,name="middle") and not isPalmFingerBent(hand,name="ring") and isPalmFingerBent(hand,name="pinky")):
+        return True
+    return False
+
+
+def get_actions(hand):
+    t="None"
+    if handleVolume(hand):
+        t="Volume"
+    if handleSpeed(hand):
+        t="Speed"
+    if handlePitch(hand):
+        t="Pitch"
+    return t

@@ -8,6 +8,10 @@ import detection
 mp_drawing = mp.solutions.drawing_utils
 mp_hands = mp.solutions.hands
 
+volume = 1.0
+pitch_shift_steps = 0
+speed_rate = 1.0
+
 cap=cv2.VideoCapture(0)
 
 """index: the hand result (i.e 0 or 1), hand: the actual hand landmarks, results: all detections from model"""
@@ -55,6 +59,99 @@ def print_message(image,text,selector):
         cv2.putText(image, text,(10,60), cv2.FONT_HERSHEY_SIMPLEX,1,color,2,cv2.LINE_AA)
     return 
            
+def draw_volume(frame,y):
+    volume_level = (volume/2.0) 
+
+    # Define bar dimensions
+    bar_x = 580          # x position of the bar
+    bar_y = 60          # y position (top of the bar)
+    bar_width = 30      # width of the bar
+    bar_height = 380    # max height of the bar
+
+    # Calculate the current filled height based on volume
+    filled_height = int(bar_height * volume_level)
+
+    cv2.putText(frame,'Volume', (bar_x - 30, bar_y -10),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+    # Draw the background of the bar (empty part)
+    cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height), (50, 50, 50), thickness=-1)
+
+    # Draw the filled part (current volume)
+    cv2.rectangle(frame, (bar_x, bar_y + (bar_height - filled_height)), 
+                    (bar_x + bar_width, bar_y + bar_height), (0, 255, 0), thickness=-1)
+
+    # Add a volume percentage text
+    cv2.putText(frame, f'{int(volume_level * 100)}%', (bar_x - 10, bar_y + bar_height + 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)    
+       
+def draw_pitch(frame,y):
+    volume_level = (volume/2.0) 
+
+    # Define bar dimensions
+    bar_x = 580          # x position of the bar
+    bar_y = 60          # y position (top of the bar)
+    bar_width = 30      # width of the bar
+    bar_height = 380    # max height of the bar
+
+    # Calculate the current filled height based on volume
+    filled_height = int(bar_height * volume_level)
+
+    cv2.putText(frame,'Pitch', (bar_x - 10, bar_y -10),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+    # Draw the background of the bar (empty part)
+    cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height), (50, 50, 50), thickness=-1)
+
+    # Draw the filled part (current volume)
+    cv2.rectangle(frame, (bar_x, bar_y + (bar_height - filled_height)), 
+                    (bar_x + bar_width, bar_y + bar_height), (255, 0, 0), thickness=-1)
+
+    # Add a volume percentage text
+    cv2.putText(frame, f'{int(volume_level * 100)}%', (bar_x - 10, bar_y + bar_height + 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)    
+       
+def draw_speed(frame,y):
+    volume_level = (volume/2.0) 
+
+    # Define bar dimensions
+    bar_x = 580          # x position of the bar
+    bar_y = 60          # y position (top of the bar)
+    bar_width = 30      # width of the bar
+    bar_height = 380    # max height of the bar
+
+    # Calculate the current filled height based on volume
+    filled_height = int(bar_height * volume_level)
+
+    cv2.putText(frame,'Speed', (bar_x - 25, bar_y -10),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+    # Draw the background of the bar (empty part)
+    cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height), (50, 50, 50), thickness=-1)
+
+    # Draw the filled part (current volume)
+    cv2.rectangle(frame, (bar_x, bar_y + (bar_height - filled_height)), 
+                    (bar_x + bar_width, bar_y + bar_height), (0, 0, 255), thickness=-1)
+
+    # Add a volume percentage text
+    cv2.putText(frame, f'{int(volume_level * 100)}%', (bar_x - 10, bar_y + bar_height + 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)    
+
+def handle_dash_board(frame,hand,action):
+    # === DRAWING DASHBOARD ===
+    lm = hand.landmark[8]
+
+    h, w, c = frame.shape
+    x, y = int(lm.x * w), int(lm.y * h)
+
+    if action=="Volume":
+        draw_volume(image,y)
+    if action=="Pitch":
+        draw_pitch(image,y)
+
+    if action=="Speed":
+        draw_speed(image,y)
+
 
 with mp_hands.Hands(min_detection_confidence=0.8,min_tracking_confidence=0.5) as hands :
     while cap.isOpened():
@@ -111,21 +208,24 @@ with mp_hands.Hands(min_detection_confidence=0.8,min_tracking_confidence=0.5) as
                     #use right hand for audio controller
                     if name_hand=="Right":
                         draw_controller(image,hand,landmark_id)
-                        t=detection.get_gesture_name(hand)
-                        print_message(image,t,2)
+                        action=detection.get_actions(hand)
+                        print_message(image,action,2)
+                        handle_dash_board(image,hand,action)
                         
                 #if unique hand use it for controller        
                 if len(results.multi_hand_landmarks)==1:
                     draw_controller(image,hand,landmark_id)
-                    t=detection.get_gesture_name(hand)
-                    print_message(image,t,2)
+                    action=detection.get_actions(hand)
+                    print_message(image,action,2)
+                    handle_dash_board(image,hand,action)
 
                 #if too much hands
                 if len(results.multi_hand_landmarks)>2:
                     txt="Too much hands on screen"
                     cv2.putText(image, txt,(10,30), cv2.FONT_HERSHEY_SIMPLEX,1,(0,0,255),2,cv2.LINE_AA)
+        
                    
-        cv2.imshow("Hand Tracking",image)
+        cv2.imshow("AIR Music Controller",image)
 
         if cv2.waitKey(10) & 0xFF == ord('q'):
             break

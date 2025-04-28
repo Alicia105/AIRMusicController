@@ -1,6 +1,4 @@
 import numpy as np
-import pyautogui
-import time
 
 #with a,b,c being points
 #Calculate the euclidian norm between two points 
@@ -66,29 +64,45 @@ def isThumbBent(hand):
         return False
     return None #fallback
 
-#Hand gestures
+#Hand gestures for audio player
 
+#Pause
 def isFist(hand):
     if(isThumbBent(hand) and isPalmFingerBent(hand,name="index") and isPalmFingerBent(hand,name="middle") and isPalmFingerBent(hand,name="ring") and isPalmFingerBent(hand,name="pinky")):
         return True
     return False
 
+#restart track 
 def isPeace(hand):
     if(isThumbBent(hand) and not isPalmFingerBent(hand,name="index") and not isPalmFingerBent(hand,name="middle") and isPalmFingerBent(hand,name="ring") and isPalmFingerBent(hand,name="pinky")):
         return True
     return False
 
-def isLoveU(hand):
-    if(not isThumbBent(hand) and not isPalmFingerBent(hand,name="index") and isPalmFingerBent(hand,name="middle") and isPalmFingerBent(hand,name="ring") and not isPalmFingerBent(hand,name="pinky")):
+#skip track 
+def isThumbUp(hand):
+    if(not isThumbBent(hand) and isPalmFingerBent(hand,name="index") and isPalmFingerBent(hand,name="middle") and isPalmFingerBent(hand,name="ring") and isPalmFingerBent(hand,name="pinky")):
         return True
     return False
 
+#rewind track 
+def isPinkyUp(hand):
+    if(not isThumbBent(hand) and isPalmFingerBent(hand,name="index") and isPalmFingerBent(hand,name="middle") and isPalmFingerBent(hand,name="ring") and not isPalmFingerBent(hand,name="pinky")):
+        return True
+    return False
+
+#Play
 def isOpenHand(hand):
     if(not isThumbBent(hand) and not isPalmFingerBent(hand,name="index") and not isPalmFingerBent(hand,name="middle") and not isPalmFingerBent(hand,name="ring") and not isPalmFingerBent(hand,name="pinky")):
         return True
     return False
 
+#open equalizer menu ?
+def isLoveU(hand):
+    if(not isThumbBent(hand) and not isPalmFingerBent(hand,name="index") and isPalmFingerBent(hand,name="middle") and isPalmFingerBent(hand,name="ring") and not isPalmFingerBent(hand,name="pinky")):
+        return True
+    return False
 
+#Hand gestures for audio controller
 
 
 def get_gesture_name(hand):
@@ -103,3 +117,27 @@ def get_gesture_name(hand):
         t="Open Hand"
     return t
 
+"""
+def control_audio_parameters(hand):
+    if isFist(hand):
+    if isPeace(hand):
+    if isThumbUp(hand):
+    if isPinkyUp(hand):
+    if isOpenHand(hand):
+    if isLoveU(hand):"""
+
+def control_audio_player(hand):
+    t="None"
+    if isFist(hand):
+        t="Pause"
+    if isPeace(hand):
+        t="Restart"
+    if isThumbUp(hand):
+        t="Skip"
+    if isPinkyUp(hand):
+        t="Rewind"
+    if isOpenHand(hand):
+        t="Play"
+    if isLoveU(hand):
+        t="Equalizer"
+    return t

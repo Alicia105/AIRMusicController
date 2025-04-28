@@ -45,10 +45,14 @@ def get_controller_screen_coordinates(hand,landmark_id):
 
     return [x_screen,y_screen]
 
-def print_message(image,text):
-   
-    color=(0,255,0)
-    cv2.putText(image, text,(10,30), cv2.FONT_HERSHEY_SIMPLEX,1,color,2,cv2.LINE_AA)
+def print_message(image,text,selector):
+    if selector==1:
+        color=(0,255,0)
+        cv2.putText(image, text,(10,30), cv2.FONT_HERSHEY_SIMPLEX,1,color,2,cv2.LINE_AA)
+
+    if selector==2:
+        color=(0,0,255)
+        cv2.putText(image, text,(10,60), cv2.FONT_HERSHEY_SIMPLEX,1,color,2,cv2.LINE_AA)
     return 
            
 
@@ -99,17 +103,24 @@ with mp_hands.Hands(min_detection_confidence=0.8,min_tracking_confidence=0.5) as
                     name_hand=text[0]
                     print(name_hand)
 
-                    #use right hand for cursor
+                    #use left hand for audio player
+                    if name_hand=="Left":
+                        t=detection.control_audio_player(hand)
+                        print_message(image,t,1)
+
+                    #use right hand for audio controller
                     if name_hand=="Right":
                         draw_controller(image,hand,landmark_id)
                         t=detection.get_gesture_name(hand)
-                        print_message(image,t)
+                        print_message(image,t,2)
                         
-                #use unique hand for cursor        
+                #if unique hand use it for controller        
                 if len(results.multi_hand_landmarks)==1:
                     draw_controller(image,hand,landmark_id)
                     t=detection.get_gesture_name(hand)
-                    print_message(image,t)
+                    print_message(image,t,2)
+
+                #if too much hands
                 if len(results.multi_hand_landmarks)>2:
                     txt="Too much hands on screen"
                     cv2.putText(image, txt,(10,30), cv2.FONT_HERSHEY_SIMPLEX,1,(0,0,255),2,cv2.LINE_AA)

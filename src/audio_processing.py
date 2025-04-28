@@ -68,7 +68,15 @@ def audio_callback(outdata, frames, time_info, status):
         return
 
     if block.ndim == 1:
-        block = block[:, np.newaxis]  # Reshape
+        block = block[:, np.newaxis]  # Reshape to (N, 1)
+
+    # Adjust block size
+    if len(block) < frames:
+        # Pad if too short
+        block = np.pad(block, ((0, frames - len(block)), (0, 0)), mode='constant')
+    elif len(block) > frames:
+        # Cut if too long
+        block = block[:frames]
 
     outdata[:] = block
 

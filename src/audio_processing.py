@@ -1,109 +1,81 @@
-import pyrubberband as pyrb
-import soundfile as sf
-import sounddevice as sd
-import librosa
 import numpy as np
+import sounddevice as sd
+import soundfile as sf
 import threading
+import queue
 import time
+import pyrubberband as pyrb
 
-# Load the audio
-
-"""Faster
-audio, sr = librosa.load('../audio/029500_morning-rain-piano-65875.wav', sr=None)
-audio_faster = librosa.effects.time_stretch(audio, rate=1.5)
-
-sd.play(audio_faster, samplerate=sr)
-sd.wait()"""
-
-"""Volume
-#audio, sr = sf.read('../audio/029500_morning-rain-piano-65875.wav')  # 'sr' = sample rate
-# Half volume
-quieter_audio = 0.5 * audio
-
-sd.play(quieter_audio, samplerate=sr)
-sd.wait()"""
-
-"""Pitch shift
-audio, sr = librosa.load('../audio/029500_morning-rain-piano-65875.wav', sr=None)
-
-
-print(f"Audio shape: {audio.shape}")
-print(f"Sampling rate: {sr}")
-print(f"Duration (seconds): {audio.shape[0] / sr}")
-
-# +4 semitones (pitch up)
-audio_pitch_up = librosa.effects.pitch_shift(audio, sr=sr, n_steps=4)
-
-# Play
-sd.play(audio_pitch_up, samplerate=sr)
-sd.wait()"""
-
-
-# Load
-audio, sr = librosa.load('../audio/029500_morning-rain-piano-65875.wav', sr=None)
-audio_ptr = 0
+# Load audio
+audio, sr = sf.read('../audio/029500_morning-rain-piano-65875.wav')
+if audio.ndim > 1:
+    audio = np.mean(audio, axis=1)  # Force mono
 
 # Settings
-stretch_buffer = np.array([]) 
-block_size = 2048  # Small block for streaming
-is_playing = True
+block_size = 1024
 volume = 1.0
 pitch_shift_steps = 0
 speed_rate = 1.0
+
+# Control flags
+is_playing = True
+
+# Buffer for processed audio (thread-safe)
+processed_buffer = queue.Queue(maxsize=50)  # 50 blocks max to avoid RAM explosion
 position = 0
 
-
-def audio_callback(outdata, frames, time, status):
-    global position, audio, volume, pitch_shift_steps, speed_rate, stretch_buffer
-
-    if not is_playing:
-        outdata[:] = np.zeros((frames, 1))
-        return
-
-    # Fill stretch buffer if needed
-    while len(stretch_buffer) < frames:
-        # Load next block of original audio
+def background_processing():
+    global position, volume, pitch_shift_steps, speed_rate
+    while is_playing:
+        # Load next block of audio
         end_pos = min(position + block_size, len(audio))
         block = audio[position:end_pos]
         position = end_pos
 
         if block.size == 0:
-            # End of audio
-            outdata[:] = np.zeros((frames, 1))
-            raise sd.CallbackStop()
+            break  # End of file
 
-        # Apply pitch shift
-        # Apply pitch and tempo change
+        # Pitch shift
         if pitch_shift_steps != 0:
             block = pyrb.pitch_shift(block, sr, n_steps=pitch_shift_steps)
 
+        # Time stretch
         if speed_rate != 1.0:
             block = pyrb.time_stretch(block, sr, speed_rate)
 
-        # Append to buffer
-        stretch_buffer = np.concatenate((stretch_buffer, block))
+        # Volume control
+        block = volume * block
 
-    # Take exactly `frames` samples
-    out_chunk = stretch_buffer[:frames]
-    stretch_buffer = stretch_buffer[frames:]
+        # Clip
+        block = np.clip(block, -1.0, 1.0)
 
-    # Volume
-    out_chunk = volume * out_chunk
+        # Pad block if too short
+        if len(block) < block_size:
+            block = np.pad(block, (0, block_size - len(block)))
 
-    # Clip to avoid overflow
-    out_chunk = np.clip(out_chunk, -1.0, 1.0)
+        # Push to buffer
+        try:
+            processed_buffer.put(block, timeout=0.5)
+        except queue.Full:
+            # If the buffer is full, just wait
+            pass
 
-    # Reshape
-    if out_chunk.ndim == 1:
-        out_chunk = out_chunk[:, np.newaxis]
+def audio_callback(outdata, frames, time_info, status):
+    try:
+        block = processed_buffer.get_nowait()
+    except queue.Empty:
+        outdata[:] = np.zeros((frames, 1))
+        return
 
-    outdata[:] = out_chunk
+    if block.ndim == 1:
+        block = block[:, np.newaxis]  # Reshape
 
-# Control thread
+    outdata[:] = block
+
 def control_audio():
     global volume, pitch_shift_steps, speed_rate
-    while True:
-        cmd = input("w=Vol+, s=Vol-, a=Pitch-, d=Pitch+, q=Speed-, e=Speed+: ")
+    while is_playing:
+        cmd = input("w=Vol+, s=Vol-, a=Pitch-, d=Pitch+, q=Speed-, e=Speed+, x=Exit: ")
         if cmd == 'w':
             volume = min(volume + 0.1, 2.0)
         elif cmd == 's':
@@ -116,23 +88,37 @@ def control_audio():
             speed_rate = max(0.5, speed_rate - 0.1)
         elif cmd == 'e':
             speed_rate = min(2.0, speed_rate + 0.1)
+        elif cmd == 'x':
+            stop_stream()
+            break
 
         print(f"Volume={volume:.2f}, Pitch steps={pitch_shift_steps}, Speed={speed_rate:.2f}")
 
-# Launch audio stream and control
-stream = sd.OutputStream(
-    samplerate=sr, channels=1, callback=audio_callback, blocksize=block_size
-)
-stream.start()
-
-threading.Thread(target=control_audio, daemon=True).start()
-
-# Keep main thread alive
-try:
-    while True:
-        pass
-except KeyboardInterrupt:
-    print("Stopping...")
+def stop_stream():
+    global is_playing
+    is_playing = False
     stream.stop()
     stream.close()
 
+# Launch background processor
+threading.Thread(target=background_processing, daemon=True).start()
+
+# Launch control thread
+threading.Thread(target=control_audio, daemon=True).start()
+
+# Start audio output
+stream = sd.OutputStream(
+    samplerate=sr,
+    channels=1,
+    blocksize=block_size,
+    callback=audio_callback
+)
+stream.start()
+
+# Keep main alive
+try:
+    while is_playing:
+        time.sleep(0.1)
+except KeyboardInterrupt:
+    stop_stream()
+    print("Stopped by user.")

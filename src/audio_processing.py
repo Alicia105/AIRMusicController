@@ -1,3 +1,4 @@
+import pyrubberband as pyrb
 import soundfile as sf
 import sounddevice as sd
 import librosa
@@ -72,16 +73,12 @@ def audio_callback(outdata, frames, time, status):
             raise sd.CallbackStop()
 
         # Apply pitch shift
+        # Apply pitch and tempo change
         if pitch_shift_steps != 0:
-            block = librosa.effects.pitch_shift(block, sr=sr, n_steps=pitch_shift_steps)
+            block = pyrb.pitch_shift(block, sr, n_steps=pitch_shift_steps)
 
         if speed_rate != 1.0:
-            # 1. STFT
-            stft = librosa.stft(block)
-            # 2. Phase Vocoder
-            stft_stretched = librosa.phase_vocoder(stft, rate=speed_rate, hop_length=512)
-            # 3. Inverse STFT
-            block = librosa.istft(stft_stretched, hop_length=512)
+            block = pyrb.time_stretch(block, sr, speed_rate)
 
         # Append to buffer
         stretch_buffer = np.concatenate((stretch_buffer, block))

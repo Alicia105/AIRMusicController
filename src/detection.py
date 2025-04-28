@@ -66,33 +66,40 @@ def isThumbBent(hand):
         return False
     return None #fallback
 
-def left_click():
-    pyautogui.click()  # Defaults to left click
-    print("Left click performed")
-    time.sleep(0.2)  # Small delay to avoid multiple clicks
-    return 1
+#Hand gestures
 
-def right_click():
-    pyautogui.click(button='right')
-    print("Right click performed")
-    time.sleep(0.2)
-    return 2
+def isFist(hand):
+    if(isThumbBent(hand) and isPalmFingerBent(hand,name="index") and isPalmFingerBent(hand,name="middle") and isPalmFingerBent(hand,name="ring") and isPalmFingerBent(hand,name="pinky")):
+        return True
+    return False
 
-def double_click():
-    pyautogui.doubleClick()
-    print("Double click performed")
-    time.sleep(0.2)
-    return 3
+def isPeace(hand):
+    if(isThumbBent(hand) and not isPalmFingerBent(hand,name="index") and not isPalmFingerBent(hand,name="middle") and isPalmFingerBent(hand,name="ring") and isPalmFingerBent(hand,name="pinky")):
+        return True
+    return False
 
-def interactWithScreen(hand,x_screen, y_screen):
-    t=0
-    if not isPalmFingerBent(hand,name="index") and isThumbBent(hand) :
-        pyautogui.moveTo(x_screen, y_screen)
-        t=0
-    if(not isThumbBent(hand) and isPalmFingerBent(hand,name="index") and not isPalmFingerBent(hand,name="middle")):
-        t=left_click()
-    if(not isThumbBent(hand) and not isPalmFingerBent(hand,name="index") and isPalmFingerBent(hand,name="middle")):
-        t=right_click()
-    if(not isThumbBent(hand) and isPalmFingerBent(hand,name="index") and isPalmFingerBent(hand,name="middle")):
-        t=double_click()
+def isLoveU(hand):
+    if(not isThumbBent(hand) and not isPalmFingerBent(hand,name="index") and isPalmFingerBent(hand,name="middle") and isPalmFingerBent(hand,name="ring") and not isPalmFingerBent(hand,name="pinky")):
+        return True
+    return False
+
+def isOpenHand(hand):
+    if(not isThumbBent(hand) and not isPalmFingerBent(hand,name="index") and not isPalmFingerBent(hand,name="middle") and not isPalmFingerBent(hand,name="ring") and not isPalmFingerBent(hand,name="pinky")):
+        return True
+    return False
+
+
+
+
+def get_gesture_name(hand):
+    t="None"
+    if isFist(hand):
+        t="Fist"
+    if isPeace(hand):
+        t="Peace"
+    if isLoveU(hand):
+        t="I Love U"
+    if isOpenHand(hand):
+        t="Open Hand"
     return t
+

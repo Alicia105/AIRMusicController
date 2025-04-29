@@ -5,6 +5,7 @@ import threading
 import queue
 import time
 import pyrubberband as pyrb
+from shared_data import block_size,is_playing,volume,pitch_shift_steps,speed_rate,param_lock
 
 # Load audio
 audio, sr = sf.read('../audio/0_oliver-colbentson_bwv1006_mov5.wav')
@@ -12,57 +13,18 @@ if audio.ndim > 1:
     audio = np.mean(audio, axis=1)  # Force mono
 
 # Settings
-block_size = 1024
-volume = 1.0
-pitch_shift_steps = 0
-speed_rate = 1.0
+#block_size = 1024
+#volume = 1.0
+#pitch_shift_steps = 0
+#speed_rate = 1.0
 
 # Control flags
-is_playing = True
+#is_playing = True
 
 # Buffer for processed audio (thread-safe)
 processed_buffer = queue.Queue(maxsize=50)  # 50 blocks max to avoid RAM explosion
 position = 0
 
-
-"""def background_processing(): 
-    global position, volume, pitch_shift_steps, speed_rate
-    while is_playing:
-
-        processing_block_size = 16384  # Processing block size
-        # Load next big processing block
-        end_pos = min(position + processing_block_size, len(audio))
-        block = audio[position:end_pos]
-        position = end_pos
-
-        if block.size == 0:
-            break  # End of file
-
-        # Pitch shift
-        if pitch_shift_steps != 0:
-            block = pyrb.pitch_shift(block, sr, n_steps=pitch_shift_steps)
-
-        # Time stretch
-        if speed_rate != 1.0:
-            block = pyrb.time_stretch(block, sr, speed_rate)
-
-        # Volume control
-        block = volume * block
-
-        # Clip
-        block = np.clip(block, -1.0, 1.0)
-
-        # Now split into small playback blocks
-        for i in range(0, len(block), block_size):
-            small_block = block[i:i+block_size]
-            if len(small_block) < block_size:
-                small_block = np.pad(small_block, (0, block_size - len(small_block)))
-            try:
-                processed_buffer.put(small_block, timeout=0.5)
-            except queue.Full:
-                pass  # skip if full
-
-"""
 
 def background_processing():
     global position, volume, pitch_shift_steps, speed_rate
@@ -129,7 +91,6 @@ def background_processing():
             except queue.Full:
                 pass  # skip if full
 
-
 def audio_callback(outdata, frames, time_info, status):
     try:
         block = processed_buffer.get_nowait()
@@ -142,7 +103,7 @@ def audio_callback(outdata, frames, time_info, status):
 
     outdata[:] = block
 
-def control_audio():
+def control_audio_keyboard():
     global volume, pitch_shift_steps, speed_rate,is_playing
     while is_playing:
         cmd = input("w=Vol+, s=Vol-, a=Pitch-, d=Pitch+, q=Speed-, e=Speed+,  p=play/pause, x=Exit: ")
@@ -166,6 +127,15 @@ def control_audio():
 
         print(f"Volume={volume:.2f}, Pitch steps={pitch_shift_steps}, Speed={speed_rate:.2f}")
 
+def control_audio_vision(vol,pitch,speed,isPlaying):
+    with param_lock:
+        volume=vol
+        pitch_shift_steps=pitch
+        speed_rate=speed
+        is_playing=isPlaying
+        
+    print(f"Volume={volume:.2f}, Pitch steps={pitch_shift_steps}, Speed={speed_rate:.2f}")
+
 def stop_stream():
     global is_playing
     is_playing = False
@@ -178,7 +148,7 @@ def start_audio_system(with_control=True):
     threading.Thread(target=background_processing, daemon=True).start()
     
     if with_control:
-        threading.Thread(target=control_audio, daemon=True).start()
+        threading.Thread(target=control_audio_keyboard, daemon=True).start()
 
     stream = sd.OutputStream(
         samplerate=sr,
@@ -197,4 +167,47 @@ def start_audio_system(with_control=True):
 
 
 if __name__ == "__main__":
-    start_audio_system(False)
+    start_audio_system(True)
+
+
+
+
+
+"""def background_processing(): 
+    global position, volume, pitch_shift_steps, speed_rate
+    while is_playing:
+
+        processing_block_size = 16384  # Processing block size
+        # Load next big processing block
+        end_pos = min(position + processing_block_size, len(audio))
+        block = audio[position:end_pos]
+        position = end_pos
+
+        if block.size == 0:
+            break  # End of file
+
+        # Pitch shift
+        if pitch_shift_steps != 0:
+            block = pyrb.pitch_shift(block, sr, n_steps=pitch_shift_steps)
+
+        # Time stretch
+        if speed_rate != 1.0:
+            block = pyrb.time_stretch(block, sr, speed_rate)
+
+        # Volume control
+        block = volume * block
+
+        # Clip
+        block = np.clip(block, -1.0, 1.0)
+
+        # Now split into small playback blocks
+        for i in range(0, len(block), block_size):
+            small_block = block[i:i+block_size]
+            if len(small_block) < block_size:
+                small_block = np.pad(small_block, (0, block_size - len(small_block)))
+            try:
+                processed_buffer.put(small_block, timeout=0.5)
+            except queue.Full:
+                pass  # skip if full
+
+"""

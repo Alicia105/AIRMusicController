@@ -4,3 +4,4 @@ src/m.py
 audio/*.wav
 audio/*.mp3
 src/__pycache__/audio_processing.cpython-312.pyc
+src/__pycache__/shared_data.cpython-312.pyc

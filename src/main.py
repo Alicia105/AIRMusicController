@@ -6,30 +6,15 @@ import audio_processing
 import threading
 import sounddevice as sd
 import soundfile as sf
-import queue
+from shared_data import is_playing,volume,pitch_shift_steps,speed_rate,block_size,param_lock
 
 #import hands landmarks and medeiapipe hand tracking model
 mp_drawing = mp.solutions.drawing_utils
 mp_hands = mp.solutions.hands
 
-audio, sr = sf.read('../audio/0_oliver-colbentson_bwv1006_mov5.wav')
+audio, sr = sf.read('../audio/029500_morning-rain-piano-65875.wav')
 if audio.ndim > 1:
     audio = np.mean(audio, axis=1)  # Force mono
-
-# Settings
-block_size = 1024
-volume = 1.0
-pitch_shift_steps = 0
-speed_rate = 1.0
-
-# Control flags
-is_playing = True
-
-# Buffer for processed audio (thread-safe)
-processed_buffer = queue.Queue(maxsize=50)  # 50 blocks max to avoid RAM explosion
-position = 0
-
-cap=cv2.VideoCapture(0)
 
 """index: the hand result (i.e 0 or 1), hand: the actual hand landmarks, results: all detections from model"""
 def get_hand_label(index,hand,results,width,height):
@@ -91,16 +76,17 @@ def set_graduation(image, hand, minPix, maxPix, minVal, maxVal, numGrad, selecto
     return minVal  # Default if no match
 
 def draw_volume(frame,hand,action):
-    global volume
-    
+    #global volume
+    with param_lock:
+        vol=volume
     # Define bar dimensions
     bar_x = 450         # x position of the bar
     bar_y = 50          # y position (top of the bar)
     bar_width = 30      # width of the bar
     bar_height = 380    # max height of the bar
     if action=="Volume":
-        volume=set_graduation(frame,hand,bar_y, bar_y + bar_height,0,2.0,10,2)
-    volume_level = (volume/2.0) 
+        vol=set_graduation(frame,hand,bar_y, bar_y + bar_height,0,2.0,10,2)
+    volume_level = (vol/2.0) 
 
     # Calculate the current filled height based on volume
     filled_height = int(bar_height * volume_level)
@@ -118,9 +104,12 @@ def draw_volume(frame,hand,action):
     # Add a volume percentage text
     cv2.putText(frame, f'{int(volume_level * 100)}%', (bar_x - 10, bar_y + bar_height + 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)    
+    return volume
     
 def draw_pitch(frame,hand,action):
-    global pitch_shift_steps
+    #global pitch_shift_steps
+    with param_lock:
+        pitch_shift=pitch_shift_steps
 
     # Define bar dimensions
     bar_x = 530          # x position of the bar
@@ -130,16 +119,16 @@ def draw_pitch(frame,hand,action):
 
     # Get semitone shift from hand
     if action=="Pitch":
-        pitch_shift_steps = set_graduation(frame, hand, bar_y, bar_y + bar_height, -12, 12, 24, 2)
+        pitch_shift = set_graduation(frame, hand, bar_y, bar_y + bar_height, -12, 12, 24, 2)
     
     # Clamp pitch shift just in case
-    pitch_shift_steps = max(-12, min(12, pitch_shift_steps))
+    pitch_shift = max(-12, min(12, pitch_shift))
     
     # Calculate pitch multiplier
-    pitch_multiplier = round(2 ** (pitch_shift_steps / 12), 3)
+    pitch_multiplier = round(2 ** (pitch_shift / 12), 3)
 
     # Normalize filled bar height
-    normalized = (pitch_shift_steps + 12) / 24  # maps -12:12 --> 0:1
+    normalized = (pitch_shift + 12) / 24  # maps -12:12 --> 0:1
     filled_height = int(bar_height * normalized)
 
     # Draw the background of the bar
@@ -175,17 +164,20 @@ def draw_pitch(frame,hand,action):
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
     cv2.putText(frame, f'x{pitch_multiplier}', (bar_x - 15, bar_y + bar_height + 50),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+    return pitch_shift
 
 def draw_speed(frame,hand,action):
-    global speed_rate
+    #global speed_rate
+    with param_lock:
+        speed=speed_rate
     # Define bar dimensions
     bar_x = 600          # x position of the bar
     bar_y = 50          # y position (top of the bar)
     bar_width = 30      # width of the bar
     bar_height = 380    # max height of the bar
     if action=="Speed":
-        speed_rate=set_graduation(frame,hand,bar_y, bar_y + bar_height,0.5,2.0,10,2)
-    speed_level = (speed_rate/(2.0-0.5)) 
+        speed=set_graduation(frame,hand,bar_y, bar_y + bar_height,0.5,2.0,10,2)
+    speed_level = (speed/(2.0-0.5)) 
 
     # Calculate the current filled height based on volume
     filled_height = int(bar_height * speed_level)
@@ -203,122 +195,127 @@ def draw_speed(frame,hand,action):
     # Add a volume percentage text
     cv2.putText(frame, f'{int(speed_level * 100)}%', (bar_x - 10, bar_y + bar_height + 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)    
+    return speed_rate
 
 def handle_dash_board(frame,hand,action):
     # === DRAWING DASHBOARD ===
-    lm = hand.landmark[8]
+    volume=draw_volume(frame,hand,action)
+    pitch=draw_pitch(frame,hand,action)
+    speed=draw_speed(frame,hand,action)
+    return volume,pitch,speed
 
-    h, w, c = frame.shape
-    x, y = int(lm.x * w), int(lm.y * h)
+def main():
+    global volume, pitch_shift_steps, speed_rate,is_playing,block_size
+   
+    stream = sd.OutputStream(
+        samplerate=sr,
+        channels=1,
+        blocksize=block_size,
+        callback=audio_processing.audio_callback
+    )
 
-    draw_volume(image,hand,action)
-    draw_pitch(image,hand,action)
-    draw_speed(image,hand,action)
+    stream.start()
+    threading.Thread(target=audio_processing.background_processing, daemon=True).start()
+    threading.Thread(target=audio_processing.control_audio_vision, args=(volume, pitch_shift_steps, speed_rate, is_playing), daemon=True).start()
 
-stream = sd.OutputStream(
-    samplerate=sr,
-    channels=1,
-    blocksize=block_size,
-    callback=audio_processing.audio_callback
-)
+    # Start audio output
+    cap=cv2.VideoCapture(0)
+    try :
+        with mp_hands.Hands(min_detection_confidence=0.8,min_tracking_confidence=0.5) as hands :
+            while cap.isOpened():
+                # Get index tip (id 8)
+                landmark_id = 8 
 
-stream.start()
-threading.Thread(target=audio_processing.background_processing, daemon=True).start()
-# Start audio output
+                ret,frame=cap.read()
 
-try :
-    with mp_hands.Hands(min_detection_confidence=0.8,min_tracking_confidence=0.5) as hands :
-        while cap.isOpened():
-            # Get index tip (id 8)
-            landmark_id = 8 
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                
 
-            ret,frame=cap.read()
+                #Flip horizontally
+                frame=cv2.flip(frame,1)
 
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            
+                #convert BGR to RGB-->necessary to use mediapipe 
+                frame_rgb=cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
 
-            #Flip horizontally
-            frame=cv2.flip(frame,1)
+                #set flags
+                frame_rgb.flags.writeable=False
 
-            #convert BGR to RGB-->necessary to use mediapipe 
-            frame_rgb=cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
+                #Detections
+                results=hands.process(frame_rgb)
 
-            #set flags
-            frame_rgb.flags.writeable=False
+                #Set flag to true
+                frame_rgb.flags.writeable=True
 
-            #Detections
-            results=hands.process(frame_rgb)
+                #Convert RGB back to BGR
+                image=cv2.cvtColor(frame_rgb,cv2.COLOR_RGB2BGR)
 
-            #Set flag to true
-            frame_rgb.flags.writeable=True
+                print(results)
+                #Rendering results 
+                # Color in BGR in DrawingSpec 
+                if results.multi_hand_landmarks:
+                    for num, hand in enumerate(results.multi_hand_landmarks):
+                        mp_drawing.draw_landmarks(image,hand,mp_hands.HAND_CONNECTIONS,
+                                                mp_drawing.DrawingSpec(color=(255,255,120), thickness=2, circle_radius=4),
+                                                    mp_drawing.DrawingSpec(color=(255,76,134), thickness=2, circle_radius=2))
+                        
+                        #Render Left or right hand label
+                        if get_hand_label(num, hand, results,width,height):
+                            text, coord = get_hand_label(num, hand, results,width,height)
+                            cv2.putText(image, text, coord, cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2,cv2.LINE_AA)
+                            text = text.split()
+                            name_hand=text[0]
+                            print(name_hand)
 
-            #Convert RGB back to BGR
-            image=cv2.cvtColor(frame_rgb,cv2.COLOR_RGB2BGR)
+                            #use left hand for audio player
+                            if name_hand=="Left":
+                                t=detection.control_audio_player(hand)
+                                if t=="Pause": 
+                                    is_playing = not is_playing
+                                if t=="Play": 
+                                    is_playing = not is_playing
+                                print_message(image,t,1)
 
-            print(results)
-            #Rendering results 
-            # Color in BGR in DrawingSpec 
-            if results.multi_hand_landmarks:
-                for num, hand in enumerate(results.multi_hand_landmarks):
-                    mp_drawing.draw_landmarks(image,hand,mp_hands.HAND_CONNECTIONS,
-                                            mp_drawing.DrawingSpec(color=(255,255,120), thickness=2, circle_radius=4),
-                                                mp_drawing.DrawingSpec(color=(255,76,134), thickness=2, circle_radius=2))
-                    
-                    #Render Left or right hand label
-                    if get_hand_label(num, hand, results,width,height):
-                        text, coord = get_hand_label(num, hand, results,width,height)
-                        cv2.putText(image, text, coord, cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2,cv2.LINE_AA)
-                        text = text.split()
-                        name_hand=text[0]
-                        print(name_hand)
-
-                        #use left hand for audio player
-                        if name_hand=="Left":
-                            t=detection.control_audio_player(hand)
-                            if t=="Pause": 
-                                is_playing = not is_playing
-                            if t=="Play": 
-                                is_playing = not is_playing
-                            print_message(image,t,1)
-
-                        #use right hand for audio controller
-                        if name_hand=="Right":
+                            #use right hand for audio controller
+                            if name_hand=="Right":
+                                draw_controller(image,hand,landmark_id)
+                                action=detection.get_actions(hand)
+                                print_message(image,action,2)
+                                new_volume,new_pitch,new_speed=handle_dash_board(image,hand,action)
+                                
+                        #if unique hand use it for controller        
+                        if len(results.multi_hand_landmarks)==1:
                             draw_controller(image,hand,landmark_id)
                             action=detection.get_actions(hand)
                             print_message(image,action,2)
-                            handle_dash_board(image,hand,action)
-                            
-                    #if unique hand use it for controller        
-                    if len(results.multi_hand_landmarks)==1:
-                        draw_controller(image,hand,landmark_id)
-                        action=detection.get_actions(hand)
-                        print_message(image,action,2)
-                        handle_dash_board(image,hand,action)
+                            new_volume,new_pitch,new_speed=handle_dash_board(image,hand,action)
 
-                    #if too much hands
-                    if len(results.multi_hand_landmarks)>2:
-                        txt="Too much hands on screen"
-                        cv2.putText(image, txt,(10,30), cv2.FONT_HERSHEY_SIMPLEX,1,(0,0,255),2,cv2.LINE_AA)
-            
-                    
-            cv2.imshow("AIR Music Controller",image)
+                        #if too much hands
+                        if len(results.multi_hand_landmarks)>2:
+                            txt="Too much hands on screen"
+                            cv2.putText(image, txt,(10,30), cv2.FONT_HERSHEY_SIMPLEX,1,(0,0,255),2,cv2.LINE_AA)
+                        with param_lock:
+                            volume=new_volume
+                            pitch_shift_steps=new_pitch
+                            speed_rate=new_speed
+                        
+                cv2.imshow("AIR Music Controller",image)
 
-            if cv2.waitKey(10) & 0xFF == ord('q'):
-                break
+                if cv2.waitKey(10) & 0xFF == ord('q'):
+                    break
 
-    cap.release()
-    cv2.destroyAllWindows()
-    print(f"Frame size: {width} x {height}")
+        cap.release()
+        cv2.destroyAllWindows()
+        print(f"Frame size: {width} x {height}")
 
-# Keep main alive
-except KeyboardInterrupt:
-    audio_processing.stop_stream()
-    print("Stopped by user.")
+    # Keep main alive
+    except KeyboardInterrupt:
+        audio_processing.stop_stream()
+        print("Stopped by user.")
 
 
-
+main()
 
 
 

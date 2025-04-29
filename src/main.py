@@ -1,14 +1,12 @@
 import mediapipe as mp
 import cv2
 import numpy as np
-import pyautogui
 import detection
 import audio_processing
 import threading
 import sounddevice as sd
 import soundfile as sf
 import queue
-from audio_processing import start_audio_system
 
 #import hands landmarks and medeiapipe hand tracking model
 mp_drawing = mp.solutions.drawing_utils
@@ -57,17 +55,6 @@ def draw_controller(img,hand,landmark_id):
     cx, cy = int(lm.x * w), int(lm.y * h)
     cv2.circle(img, (cx, cy), 10, (255, 0, 255), cv2.FILLED)
 
-def get_controller_screen_coordinates(hand,landmark_id):
-    # Get screen size
-    screen_w, screen_h = pyautogui.size()
-
-    lm = hand.landmark[landmark_id]
-    # Convert normalized coordinates to screen space
-    x_screen = int(lm.x * screen_w)
-    y_screen = int(lm.y * screen_h)
-
-    return [x_screen,y_screen]
-
 def print_message(image,text,selector):
     if selector==1:
         color=(0,255,0)
@@ -103,16 +90,16 @@ def set_graduation(image, hand, minPix, maxPix, minVal, maxVal, numGrad, selecto
 
     return minVal  # Default if no match
 
-def draw_volume(frame,hand):
+def draw_volume(frame,hand,action):
     global volume
     
     # Define bar dimensions
-    bar_x = 580          # x position of the bar
-    bar_y = 60          # y position (top of the bar)
+    bar_x = 450         # x position of the bar
+    bar_y = 50          # y position (top of the bar)
     bar_width = 30      # width of the bar
     bar_height = 380    # max height of the bar
-
-    volume=set_graduation(frame,hand,bar_y, bar_y + bar_height,0,2.0,10,2)
+    if action=="Volume":
+        volume=set_graduation(frame,hand,bar_y, bar_y + bar_height,0,2.0,10,2)
     volume_level = (volume/2.0) 
 
     # Calculate the current filled height based on volume
@@ -132,17 +119,18 @@ def draw_volume(frame,hand):
     cv2.putText(frame, f'{int(volume_level * 100)}%', (bar_x - 10, bar_y + bar_height + 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)    
     
-def draw_pitch(frame, hand):
+def draw_pitch(frame,hand,action):
     global pitch_shift_steps
 
     # Define bar dimensions
-    bar_x = 570          # x position of the bar
-    bar_y = 60           # y position (top of the bar)
+    bar_x = 530          # x position of the bar
+    bar_y = 50           # y position (top of the bar)
     bar_width = 30       # width of the bar
     bar_height = 380     # total height of the bar
 
     # Get semitone shift from hand
-    pitch_shift_steps = set_graduation(frame, hand, bar_y, bar_y + bar_height, -12, 12, 24, 2)
+    if action=="Pitch":
+        pitch_shift_steps = set_graduation(frame, hand, bar_y, bar_y + bar_height, -12, 12, 24, 2)
     
     # Clamp pitch shift just in case
     pitch_shift_steps = max(-12, min(12, pitch_shift_steps))
@@ -188,15 +176,15 @@ def draw_pitch(frame, hand):
     cv2.putText(frame, f'x{pitch_multiplier}', (bar_x - 15, bar_y + bar_height + 50),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-def draw_speed(frame,hand):
-
+def draw_speed(frame,hand,action):
+    global speed_rate
     # Define bar dimensions
-    bar_x = 580          # x position of the bar
-    bar_y = 60          # y position (top of the bar)
+    bar_x = 600          # x position of the bar
+    bar_y = 50          # y position (top of the bar)
     bar_width = 30      # width of the bar
     bar_height = 380    # max height of the bar
-
-    speed_rate=set_graduation(frame,hand,bar_y, bar_y + bar_height,0.5,2.0,10,2)
+    if action=="Speed":
+        speed_rate=set_graduation(frame,hand,bar_y, bar_y + bar_height,0.5,2.0,10,2)
     speed_level = (speed_rate/(2.0-0.5)) 
 
     # Calculate the current filled height based on volume
@@ -223,13 +211,9 @@ def handle_dash_board(frame,hand,action):
     h, w, c = frame.shape
     x, y = int(lm.x * w), int(lm.y * h)
 
-    if action=="Volume":
-        draw_volume(image,hand)
-    if action=="Pitch":
-        draw_pitch(image,hand)
-
-    if action=="Speed":
-        draw_speed(image,hand)
+    draw_volume(image,hand,action)
+    draw_pitch(image,hand,action)
+    draw_speed(image,hand,action)
 
 stream = sd.OutputStream(
     samplerate=sr,
@@ -323,7 +307,6 @@ try :
 
             if cv2.waitKey(10) & 0xFF == ord('q'):
                 break
-
 
     cap.release()
     cv2.destroyAllWindows()

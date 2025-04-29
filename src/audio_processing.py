@@ -197,4 +197,4 @@ def start_audio_system(with_control=True):
 
 
 if __name__ == "__main__":
-    start_audio_system()
+    start_audio_system(False)

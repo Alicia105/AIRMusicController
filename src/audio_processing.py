@@ -7,7 +7,7 @@ import time
 import pyrubberband as pyrb
 
 # Load audio
-audio, sr = sf.read('../audio/029500_morning-rain-piano-65875.wav')
+audio, sr = sf.read('../audio/0_oliver-colbentson_bwv1006_mov5.wav')
 if audio.ndim > 1:
     audio = np.mean(audio, axis=1)  # Force mono
 
@@ -143,9 +143,9 @@ def audio_callback(outdata, frames, time_info, status):
     outdata[:] = block
 
 def control_audio():
-    global volume, pitch_shift_steps, speed_rate
+    global volume, pitch_shift_steps, speed_rate,is_playing
     while is_playing:
-        cmd = input("w=Vol+, s=Vol-, a=Pitch-, d=Pitch+, q=Speed-, e=Speed+, x=Exit: ")
+        cmd = input("w=Vol+, s=Vol-, a=Pitch-, d=Pitch+, q=Speed-, e=Speed+,  p=play/pause, x=Exit: ")
         if cmd == 'w':
             volume = min(volume + 0.1, 2.0)
         elif cmd == 's':
@@ -154,6 +154,8 @@ def control_audio():
             pitch_shift_steps -= 1
         elif cmd == 'd':
             pitch_shift_steps += 1
+        elif cmd == 'p':
+            is_playing = not is_playing
         elif cmd == 'q':
             speed_rate = max(0.5, speed_rate - 0.1)
         elif cmd == 'e':
@@ -170,25 +172,29 @@ def stop_stream():
     stream.stop()
     stream.close()
 
-# Launch background processor
-threading.Thread(target=background_processing, daemon=True).start()
+def start_audio_system(with_control=True):
+    global stream
 
-# Launch control thread
-threading.Thread(target=control_audio, daemon=True).start()
+    threading.Thread(target=background_processing, daemon=True).start()
+    
+    if with_control:
+        threading.Thread(target=control_audio, daemon=True).start()
 
-# Start audio output
-stream = sd.OutputStream(
-    samplerate=sr,
-    channels=1,
-    blocksize=block_size,
-    callback=audio_callback
-)
-stream.start()
+    stream = sd.OutputStream(
+        samplerate=sr,
+        channels=1,
+        blocksize=block_size,
+        callback=audio_callback
+    )
+    stream.start()
 
-# Keep main alive
-try:
-    while is_playing:
-        time.sleep(0.1)
-except KeyboardInterrupt:
-    stop_stream()
-    print("Stopped by user.")
+    try:
+        while is_playing:
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        stop_stream()
+        print("Stopped by user.")
+
+
+if __name__ == "__main__":
+    start_audio_system()

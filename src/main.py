@@ -3,14 +3,33 @@ import cv2
 import numpy as np
 import pyautogui
 import detection
+import audio_processing
+import threading
+import sounddevice as sd
+import soundfile as sf
+import queue
+from audio_processing import start_audio_system
 
 #import hands landmarks and medeiapipe hand tracking model
 mp_drawing = mp.solutions.drawing_utils
 mp_hands = mp.solutions.hands
 
+audio, sr = sf.read('../audio/0_oliver-colbentson_bwv1006_mov5.wav')
+if audio.ndim > 1:
+    audio = np.mean(audio, axis=1)  # Force mono
+
+# Settings
+block_size = 1024
 volume = 1.0
 pitch_shift_steps = 0
 speed_rate = 1.0
+
+# Control flags
+is_playing = True
+
+# Buffer for processed audio (thread-safe)
+processed_buffer = queue.Queue(maxsize=50)  # 50 blocks max to avoid RAM explosion
+position = 0
 
 cap=cv2.VideoCapture(0)
 
@@ -113,8 +132,6 @@ def draw_volume(frame,hand):
     cv2.putText(frame, f'{int(volume_level * 100)}%', (bar_x - 10, bar_y + bar_height + 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)    
     
-
-
 def draw_pitch(frame, hand):
     global pitch_shift_steps
 
@@ -214,89 +231,110 @@ def handle_dash_board(frame,hand,action):
     if action=="Speed":
         draw_speed(image,hand)
 
-with mp_hands.Hands(min_detection_confidence=0.8,min_tracking_confidence=0.5) as hands :
-    while cap.isOpened():
-        # Get index tip (id 8)
-        landmark_id = 8 
+stream = sd.OutputStream(
+    samplerate=sr,
+    channels=1,
+    blocksize=block_size,
+    callback=audio_processing.audio_callback
+)
 
-        ret,frame=cap.read()
+stream.start()
+threading.Thread(target=audio_processing.background_processing, daemon=True).start()
+# Start audio output
 
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        
+try :
+    with mp_hands.Hands(min_detection_confidence=0.8,min_tracking_confidence=0.5) as hands :
+        while cap.isOpened():
+            # Get index tip (id 8)
+            landmark_id = 8 
 
-        #Flip horizontally
-        frame=cv2.flip(frame,1)
+            ret,frame=cap.read()
 
-        #convert BGR to RGB-->necessary to use mediapipe 
-        frame_rgb=cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            
 
-        #set flags
-        frame_rgb.flags.writeable=False
+            #Flip horizontally
+            frame=cv2.flip(frame,1)
 
-        #Detections
-        results=hands.process(frame_rgb)
+            #convert BGR to RGB-->necessary to use mediapipe 
+            frame_rgb=cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
 
-        #Set flag to true
-        frame_rgb.flags.writeable=True
+            #set flags
+            frame_rgb.flags.writeable=False
 
-        #Convert RGB back to BGR
-        image=cv2.cvtColor(frame_rgb,cv2.COLOR_RGB2BGR)
+            #Detections
+            results=hands.process(frame_rgb)
 
-        print(results)
-        #Rendering results 
-        # Color in BGR in DrawingSpec 
-        if results.multi_hand_landmarks:
-            for num, hand in enumerate(results.multi_hand_landmarks):
-                mp_drawing.draw_landmarks(image,hand,mp_hands.HAND_CONNECTIONS,
-                                          mp_drawing.DrawingSpec(color=(255,255,120), thickness=2, circle_radius=4),
-                                            mp_drawing.DrawingSpec(color=(255,76,134), thickness=2, circle_radius=2))
-                
-                #Render Left or right hand label
-                if get_hand_label(num, hand, results,width,height):
-                    text, coord = get_hand_label(num, hand, results,width,height)
-                    cv2.putText(image, text, coord, cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2,cv2.LINE_AA)
-                    text = text.split()
-                    name_hand=text[0]
-                    print(name_hand)
+            #Set flag to true
+            frame_rgb.flags.writeable=True
 
-                    #use left hand for audio player
-                    if name_hand=="Left":
-                        t=detection.control_audio_player(hand)
-                        print_message(image,t,1)
+            #Convert RGB back to BGR
+            image=cv2.cvtColor(frame_rgb,cv2.COLOR_RGB2BGR)
 
-                    #use right hand for audio controller
-                    if name_hand=="Right":
+            print(results)
+            #Rendering results 
+            # Color in BGR in DrawingSpec 
+            if results.multi_hand_landmarks:
+                for num, hand in enumerate(results.multi_hand_landmarks):
+                    mp_drawing.draw_landmarks(image,hand,mp_hands.HAND_CONNECTIONS,
+                                            mp_drawing.DrawingSpec(color=(255,255,120), thickness=2, circle_radius=4),
+                                                mp_drawing.DrawingSpec(color=(255,76,134), thickness=2, circle_radius=2))
+                    
+                    #Render Left or right hand label
+                    if get_hand_label(num, hand, results,width,height):
+                        text, coord = get_hand_label(num, hand, results,width,height)
+                        cv2.putText(image, text, coord, cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2,cv2.LINE_AA)
+                        text = text.split()
+                        name_hand=text[0]
+                        print(name_hand)
+
+                        #use left hand for audio player
+                        if name_hand=="Left":
+                            t=detection.control_audio_player(hand)
+                            if t=="Pause": 
+                                is_playing = not is_playing
+                            if t=="Play": 
+                                is_playing = not is_playing
+                            print_message(image,t,1)
+
+                        #use right hand for audio controller
+                        if name_hand=="Right":
+                            draw_controller(image,hand,landmark_id)
+                            action=detection.get_actions(hand)
+                            print_message(image,action,2)
+                            handle_dash_board(image,hand,action)
+                            
+                    #if unique hand use it for controller        
+                    if len(results.multi_hand_landmarks)==1:
                         draw_controller(image,hand,landmark_id)
                         action=detection.get_actions(hand)
                         print_message(image,action,2)
                         handle_dash_board(image,hand,action)
-                        
-                #if unique hand use it for controller        
-                if len(results.multi_hand_landmarks)==1:
-                    draw_controller(image,hand,landmark_id)
-                    action=detection.get_actions(hand)
-                    print_message(image,action,2)
-                    handle_dash_board(image,hand,action)
 
-                #if too much hands
-                if len(results.multi_hand_landmarks)>2:
-                    txt="Too much hands on screen"
-                    cv2.putText(image, txt,(10,30), cv2.FONT_HERSHEY_SIMPLEX,1,(0,0,255),2,cv2.LINE_AA)
-        
-                   
-        cv2.imshow("AIR Music Controller",image)
+                    #if too much hands
+                    if len(results.multi_hand_landmarks)>2:
+                        txt="Too much hands on screen"
+                        cv2.putText(image, txt,(10,30), cv2.FONT_HERSHEY_SIMPLEX,1,(0,0,255),2,cv2.LINE_AA)
+            
+                    
+            cv2.imshow("AIR Music Controller",image)
 
-        if cv2.waitKey(10) & 0xFF == ord('q'):
-            break
+            if cv2.waitKey(10) & 0xFF == ord('q'):
+                break
 
 
-cap.release()
+    cap.release()
+    cv2.destroyAllWindows()
+    print(f"Frame size: {width} x {height}")
 
-cv2.destroyAllWindows()
+# Keep main alive
+except KeyboardInterrupt:
+    audio_processing.stop_stream()
+    print("Stopped by user.")
 
-print(f"Frame size: {width} x {height}")
+
 
 
 

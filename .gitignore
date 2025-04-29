@@ -1,5 +1,6 @@
 src/music_player.py
 src/__pycache__/detection.cpython-312.pyc
-audio/Margella - prod by Andre Mero.mp3
-audio/029500_morning-rain-piano-65875.wav
 src/m.py
+audio/*.wav
+audio/*.mp3
+src/__pycache__/audio_processing.cpython-312.pyc

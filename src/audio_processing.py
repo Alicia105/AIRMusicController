@@ -12,6 +12,7 @@ audio, sr = sf.read('../audio/0_oliver-colbentson_bwv1006_mov5.wav')
 if audio.ndim > 1:
     audio = np.mean(audio, axis=1)  # Force mono
 
+
 # Globals
 stream = None
 position = 0
@@ -136,7 +137,7 @@ def start_audio_system(with_control=True):
     threading.Thread(target=background_processing, daemon=True).start()
 
     if with_control:
-        threading.Thread(target=control_audio_keyboard, daemon=True).start()
+        threading.Thread(target=control_audio_vision, args=(shared_data.volume, shared_data.pitch_shift_steps, shared_data.speed_rate, shared_data.is_playing),daemon=True).start()
 
     stream = sd.OutputStream(
         samplerate=sr,

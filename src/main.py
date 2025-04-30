@@ -1,20 +1,16 @@
-import mediapipe as mp
 import cv2
+import threading
+import mediapipe as mp
 import numpy as np
 import detection
 import audio_processing
-import threading
-import sounddevice as sd
-import soundfile as sf
 import shared_data
+import time
+from audio_processing import start_audio_system, control_audio_vision
 
 #import hands landmarks and medeiapipe hand tracking model
 mp_drawing = mp.solutions.drawing_utils
 mp_hands = mp.solutions.hands
-
-audio, sr = sf.read('../audio/029500_morning-rain-piano-65875.wav')
-if audio.ndim > 1:
-    audio = np.mean(audio, axis=1)  # Force mono
 
 """index: the hand result (i.e 0 or 1), hand: the actual hand landmarks, results: all detections from model"""
 def get_hand_label(index,hand,results,width,height):
@@ -206,118 +202,130 @@ def handle_dash_board(frame,hand,action):
 
 def main():
     #global volume, pitch_shift_steps, speed_rate,is_playing,block_size
-   
-    stream = sd.OutputStream(
-        samplerate=sr,
-        channels=1,
-        blocksize=shared_data.block_size,
-        callback=audio_processing.audio_callback
-    )
 
-    stream.start()
-    threading.Thread(target=audio_processing.background_processing, daemon=True).start()
-    threading.Thread(target=audio_processing.control_audio_vision, daemon=True).start()
+    last_update = time.time()
+    update_interval = 0.2  # seconds
+
+    # Start audio system in vision-only control mode
+    threading.Thread(target=audio_processing.start_audio_system, daemon=True).start()
+    #threading.Thread(target=audio_processing.control_audio_vision, daemon=True).start()
 
     # Start audio output
     cap=cv2.VideoCapture(0)
-    try :
-        with mp_hands.Hands(min_detection_confidence=0.8,min_tracking_confidence=0.5) as hands :
-            while cap.isOpened():
-                # Get index tip (id 8)
-                landmark_id = 8 
+    with mp_hands.Hands(min_detection_confidence=0.8,min_tracking_confidence=0.5) as hands :
+        while cap.isOpened():
+            # Get index tip (id 8)
+            landmark_id = 8 
 
-                ret,frame=cap.read()
+            ret,frame=cap.read()
 
-                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                fps = cap.get(cv2.CAP_PROP_FPS)
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = cap.get(cv2.CAP_PROP_FPS)
                 
+            #Flip horizontally
+            frame=cv2.flip(frame,1)
 
-                #Flip horizontally
-                frame=cv2.flip(frame,1)
+            #convert BGR to RGB-->necessary to use mediapipe 
+            frame_rgb=cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
 
-                #convert BGR to RGB-->necessary to use mediapipe 
-                frame_rgb=cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
+            #set flags
+            frame_rgb.flags.writeable=False
 
-                #set flags
-                frame_rgb.flags.writeable=False
+            #Detections
+            results=hands.process(frame_rgb)
 
-                #Detections
-                results=hands.process(frame_rgb)
+            #Set flag to true
+            frame_rgb.flags.writeable=True
 
-                #Set flag to true
-                frame_rgb.flags.writeable=True
+            #Convert RGB back to BGR
+            image=cv2.cvtColor(frame_rgb,cv2.COLOR_RGB2BGR)
 
-                #Convert RGB back to BGR
-                image=cv2.cvtColor(frame_rgb,cv2.COLOR_RGB2BGR)
-
-                print(results)
-                #Rendering results 
-                # Color in BGR in DrawingSpec 
-                if results.multi_hand_landmarks:
-                    for num, hand in enumerate(results.multi_hand_landmarks):
-                        mp_drawing.draw_landmarks(image,hand,mp_hands.HAND_CONNECTIONS,
+            print(results)
+            #Rendering results 
+            # Color in BGR in DrawingSpec 
+            if results.multi_hand_landmarks:
+                for num, hand in enumerate(results.multi_hand_landmarks):
+                    mp_drawing.draw_landmarks(image,hand,mp_hands.HAND_CONNECTIONS,
                                                 mp_drawing.DrawingSpec(color=(255,255,120), thickness=2, circle_radius=4),
                                                     mp_drawing.DrawingSpec(color=(255,76,134), thickness=2, circle_radius=2))
                         
                         #Render Left or right hand label
-                        if get_hand_label(num, hand, results,width,height):
-                            text, coord = get_hand_label(num, hand, results,width,height)
-                            cv2.putText(image, text, coord, cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2,cv2.LINE_AA)
-                            text = text.split()
-                            name_hand=text[0]
-                            print(name_hand)
+                    if get_hand_label(num, hand, results,width,height):
+                        text, coord = get_hand_label(num, hand, results,width,height)
+                        cv2.putText(image, text, coord, cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2,cv2.LINE_AA)
+                        name_hand=text[0]
+                        print(name_hand)
 
-                            #use left hand for audio player
-                            if name_hand=="Left":
-                                t=detection.control_audio_player(hand)
-                                if t=="Pause":
+                        #use left hand for audio player
+                        if name_hand=="Left":
+                            t=detection.control_audio_player(hand)
+                            if t=="Pause":
+                                if time.time() - last_update > update_interval:
                                     with shared_data.param_lock:
-                                        shared_data.is_playing = not shared_data.is_playing
-                                if t=="Play": 
+                                        shared_data.is_playing = False
+                            if t=="Play":
+                                if time.time() - last_update > update_interval:
                                     with shared_data.param_lock:
-                                        shared_data.is_playing = not shared_data.is_playing
-                                print_message(image,t,1)
+                                        shared_data.is_playing = True
+                            print_message(image,t,1)
+                            control_audio_vision(shared_data.volume,shared_data.pitch_shift_steps,shared_data.speed_rate,shared_data.is_playing)
+                            last_update = time.time()
 
-                            #use right hand for audio controller
-                            if name_hand=="Right":
-                                draw_controller(image,hand,landmark_id)
-                                action=detection.get_actions(hand)
-                                print_message(image,action,2)
-                                new_volume,new_pitch,new_speed=handle_dash_board(image,hand,action)
-                                
-                        #if unique hand use it for controller        
-                        if len(results.multi_hand_landmarks)==1:
+                        #use right hand for audio controller
+                        if name_hand=="Right":
+                            now=time.time()
                             draw_controller(image,hand,landmark_id)
                             action=detection.get_actions(hand)
                             print_message(image,action,2)
                             new_volume,new_pitch,new_speed=handle_dash_board(image,hand,action)
+                            if now - last_update > update_interval:
+                                control_audio_vision(new_volume,new_pitch,new_speed,shared_data.is_playing)
+                            last_update = time.time()
+                    #if unique hand use it for controller        
+                    if len(results.multi_hand_landmarks)==1:
+                        now=time.time()
+                        draw_controller(image,hand,landmark_id)
+                        action=detection.get_actions(hand)
+                        print_message(image,action,2)
+                        new_volume,new_pitch,new_speed=handle_dash_board(image,hand,action)
+                        if now - last_update > update_interval:
+                            control_audio_vision(new_volume,new_pitch,new_speed,shared_data.is_playing)
+                        last_update = time.time()
 
-                        #if too much hands
-                        if len(results.multi_hand_landmarks)>2:
-                            txt="Too much hands on screen"
-                            cv2.putText(image, txt,(10,30), cv2.FONT_HERSHEY_SIMPLEX,1,(0,0,255),2,cv2.LINE_AA)
-                        with shared_data.param_lock:
-                            shared_data.volume=new_volume
-                            shared_data.pitch_shift_steps=new_pitch
-                            shared_data.speed_rate=new_speed
-                        
-                cv2.imshow("AIR Music Controller",image)
+                    #if too much hands
+                    if len(results.multi_hand_landmarks)>2:
+                        txt="Too much hands on screen"
+                        cv2.putText(image, txt,(10,30), cv2.FONT_HERSHEY_SIMPLEX,1,(0,0,255),2,cv2.LINE_AA)
+                
+                with shared_data.param_lock:
+                    is_playing = shared_data.is_playing
+                print(f"Volume={shared_data.volume:.2f}, Pitch steps={shared_data.pitch_shift_steps}, Speed={shared_data.speed_rate:.2f}, isPlaying={shared_data.is_playing}")
+            cv2.imshow("AIR Music Controller",image)
 
-                if cv2.waitKey(10) & 0xFF == ord('q'):
-                    break
+            if cv2.waitKey(10) & 0xFF == ord('q'):
+                break
+
+            elif cv2.waitKey(10) & 0xFF == ord('p'):
+                with shared_data.param_lock:
+                    shared_data.is_playing = not shared_data.is_playing
 
         cap.release()
         cv2.destroyAllWindows()
         print(f"Frame size: {width} x {height}")
 
+        with shared_data.param_lock:
+            shared_data.is_playing = False  # Graceful shutdown
+
+
+        
     # Keep main alive
-    except KeyboardInterrupt:
+    """except KeyboardInterrupt:
         audio_processing.stop_stream()
-        print("Stopped by user.")
+        print("Stopped by user.")"""
 
-
-main()
+if __name__ == "__main__":
+    main()
 
 
 

@@ -6,7 +6,7 @@ import audio_processing
 import threading
 import sounddevice as sd
 import soundfile as sf
-from shared_data import is_playing,volume,pitch_shift_steps,speed_rate,block_size,param_lock
+import shared_data
 
 #import hands landmarks and medeiapipe hand tracking model
 mp_drawing = mp.solutions.drawing_utils
@@ -77,8 +77,8 @@ def set_graduation(image, hand, minPix, maxPix, minVal, maxVal, numGrad, selecto
 
 def draw_volume(frame,hand,action):
     #global volume
-    with param_lock:
-        vol=volume
+    with shared_data.param_lock:
+        vol=shared_data.volume
     # Define bar dimensions
     bar_x = 450         # x position of the bar
     bar_y = 50          # y position (top of the bar)
@@ -104,12 +104,12 @@ def draw_volume(frame,hand,action):
     # Add a volume percentage text
     cv2.putText(frame, f'{int(volume_level * 100)}%', (bar_x - 10, bar_y + bar_height + 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)    
-    return volume
+    return volume_level
     
 def draw_pitch(frame,hand,action):
     #global pitch_shift_steps
-    with param_lock:
-        pitch_shift=pitch_shift_steps
+    with shared_data.param_lock:
+        pitch_shift=shared_data.pitch_shift_steps
 
     # Define bar dimensions
     bar_x = 530          # x position of the bar
@@ -160,7 +160,7 @@ def draw_pitch(frame,hand,action):
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
     # Display pitch shift value
-    cv2.putText(frame, f'{pitch_shift_steps:+} st', (bar_x - 15, bar_y + bar_height + 25),
+    cv2.putText(frame, f'{pitch_shift:+} st', (bar_x - 15, bar_y + bar_height + 25),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
     cv2.putText(frame, f'x{pitch_multiplier}', (bar_x - 15, bar_y + bar_height + 50),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
@@ -168,8 +168,8 @@ def draw_pitch(frame,hand,action):
 
 def draw_speed(frame,hand,action):
     #global speed_rate
-    with param_lock:
-        speed=speed_rate
+    with shared_data.param_lock:
+        speed=shared_data.speed_rate
     # Define bar dimensions
     bar_x = 600          # x position of the bar
     bar_y = 50          # y position (top of the bar)
@@ -177,7 +177,7 @@ def draw_speed(frame,hand,action):
     bar_height = 380    # max height of the bar
     if action=="Speed":
         speed=set_graduation(frame,hand,bar_y, bar_y + bar_height,0.5,2.0,10,2)
-    speed_level = (speed/(2.0-0.5)) 
+    speed_level = (speed-0.5)/(2.0-0.5)
 
     # Calculate the current filled height based on volume
     filled_height = int(bar_height * speed_level)
@@ -193,30 +193,30 @@ def draw_speed(frame,hand,action):
                     (bar_x + bar_width, bar_y + bar_height), (0, 0, 255), thickness=-1)
 
     # Add a volume percentage text
-    cv2.putText(frame, f'{int(speed_level * 100)}%', (bar_x - 10, bar_y + bar_height + 30),
+    cv2.putText(frame, f'{int((speed_level)* 100)}%', (bar_x - 10, bar_y + bar_height + 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)    
-    return speed_rate
+    return speed
 
 def handle_dash_board(frame,hand,action):
     # === DRAWING DASHBOARD ===
-    volume=draw_volume(frame,hand,action)
+    vol=draw_volume(frame,hand,action)
     pitch=draw_pitch(frame,hand,action)
     speed=draw_speed(frame,hand,action)
-    return volume,pitch,speed
+    return vol,pitch,speed
 
 def main():
-    global volume, pitch_shift_steps, speed_rate,is_playing,block_size
+    #global volume, pitch_shift_steps, speed_rate,is_playing,block_size
    
     stream = sd.OutputStream(
         samplerate=sr,
         channels=1,
-        blocksize=block_size,
+        blocksize=shared_data.block_size,
         callback=audio_processing.audio_callback
     )
 
     stream.start()
     threading.Thread(target=audio_processing.background_processing, daemon=True).start()
-    threading.Thread(target=audio_processing.control_audio_vision, args=(volume, pitch_shift_steps, speed_rate, is_playing), daemon=True).start()
+    threading.Thread(target=audio_processing.control_audio_vision, daemon=True).start()
 
     # Start audio output
     cap=cv2.VideoCapture(0)
@@ -271,10 +271,12 @@ def main():
                             #use left hand for audio player
                             if name_hand=="Left":
                                 t=detection.control_audio_player(hand)
-                                if t=="Pause": 
-                                    is_playing = not is_playing
+                                if t=="Pause":
+                                    with shared_data.param_lock:
+                                        shared_data.is_playing = not shared_data.is_playing
                                 if t=="Play": 
-                                    is_playing = not is_playing
+                                    with shared_data.param_lock:
+                                        shared_data.is_playing = not shared_data.is_playing
                                 print_message(image,t,1)
 
                             #use right hand for audio controller
@@ -295,10 +297,10 @@ def main():
                         if len(results.multi_hand_landmarks)>2:
                             txt="Too much hands on screen"
                             cv2.putText(image, txt,(10,30), cv2.FONT_HERSHEY_SIMPLEX,1,(0,0,255),2,cv2.LINE_AA)
-                        with param_lock:
-                            volume=new_volume
-                            pitch_shift_steps=new_pitch
-                            speed_rate=new_speed
+                        with shared_data.param_lock:
+                            shared_data.volume=new_volume
+                            shared_data.pitch_shift_steps=new_pitch
+                            shared_data.speed_rate=new_speed
                         
                 cv2.imshow("AIR Music Controller",image)
 

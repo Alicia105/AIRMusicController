@@ -3,7 +3,6 @@ import threading
 import mediapipe as mp
 import numpy as np
 import detection
-import audio_processing
 import shared_data
 import time
 from audio_processing import start_audio_system, control_audio_vision
@@ -46,30 +45,40 @@ def print_message(image,text,selector):
         cv2.putText(image, text,(10,60), cv2.FONT_HERSHEY_SIMPLEX,1,color,2,cv2.LINE_AA)
     return 
 
-def set_graduation(image, hand, minPix, maxPix, minVal, maxVal, numGrad, selector):
-    lm = hand.landmark[8]  # Index finger tip
-
-    h, w, c = image.shape
+def set_graduation(image, hand, minPix, maxPix, minVal, maxVal, numGrad, selector, step=None): 
+    lm = hand.landmark[8]  # Index fingertip
+    h, w, _ = image.shape
     x, y = int(lm.x * w), int(lm.y * h)
 
-    incrPixel = (maxPix - minPix) / numGrad
+    # Compute increments
+    incrPixel = abs(maxPix - minPix) / numGrad
     incrValues = (maxVal - minVal) / numGrad
 
-    if selector == 2:
-        for i in range(numGrad):
-            low = minPix + i * incrPixel
-            high = minPix + (i + 1) * incrPixel
-            if low <= y < high:
-                return minVal + i * incrValues
+    value = minVal  # Default
 
-    if selector == 1:
+    if selector == 2:  # Vertical
+        # Invert pixel range so that higher Y (lower on screen) = lower value
+        for i in range(numGrad):
+            low = maxPix - (i + 1) * incrPixel
+            high = maxPix - i * incrPixel
+            if low <= y < high:
+                value = minVal + i * incrValues
+                break
+
+    elif selector == 1:  # Horizontal (no inversion here)
         for i in range(numGrad):
             low = minPix + i * incrPixel
             high = minPix + (i + 1) * incrPixel
             if low <= x < high:
-                return minVal + i * incrValues
+                value = minVal + i * incrValues
+                break
 
-    return minVal  # Default if no match
+    # Snap to step if specified
+    if step is not None:
+        steps = round((value - minVal) / step)
+        value = minVal + steps * step
+
+    return round(value, 2)
 
 def draw_volume(frame,hand,action):
     #global volume
@@ -81,7 +90,8 @@ def draw_volume(frame,hand,action):
     bar_width = 30      # width of the bar
     bar_height = 380    # max height of the bar
     if action=="Volume":
-        vol=set_graduation(frame,hand,bar_y, bar_y + bar_height,0,2.0,10,2)
+        vol = set_graduation(frame, hand, bar_y, bar_y + bar_height, 0, 2.0, 20, 2, step=0.1)
+    vol = max(0.0, min(2.0, vol))
     volume_level = (vol/2.0) 
 
     # Calculate the current filled height based on volume
@@ -115,10 +125,10 @@ def draw_pitch(frame,hand,action):
 
     # Get semitone shift from hand
     if action=="Pitch":
-        pitch_shift = set_graduation(frame, hand, bar_y, bar_y + bar_height, -12, 12, 24, 2)
+        pitch_shift = set_graduation(frame, hand, bar_y, bar_y + bar_height, -12, 12, 24, 2, step=1)
     
     # Clamp pitch shift just in case
-    pitch_shift = max(-12, min(12, pitch_shift))
+    pitch_shift = int(max(-12, min(12, pitch_shift)))
     
     # Calculate pitch multiplier
     pitch_multiplier = round(2 ** (pitch_shift / 12), 3)
@@ -171,8 +181,12 @@ def draw_speed(frame,hand,action):
     bar_y = 50          # y position (top of the bar)
     bar_width = 30      # width of the bar
     bar_height = 380    # max height of the bar
+
     if action=="Speed":
-        speed=set_graduation(frame,hand,bar_y, bar_y + bar_height,0.5,2.0,10,2)
+        speed = set_graduation(frame, hand, bar_y, bar_y + bar_height, 0.5, 2.0, 3, 2, step=0.5)
+    
+    speed = max(0.5, min(2.0, speed))
+
     speed_level = (speed-0.5)/(2.0-0.5)
 
     # Calculate the current filled height based on volume
@@ -205,7 +219,7 @@ def main():
     update_interval = 0.2  # seconds
 
     # Start audio system in vision-only control mode
-    threading.Thread(target=audio_processing.start_audio_system, daemon=True).start()
+    threading.Thread(target=start_audio_system, daemon=True).start()
     
     # Start audio output
     cap=cv2.VideoCapture(0)

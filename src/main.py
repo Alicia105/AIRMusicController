@@ -201,15 +201,12 @@ def handle_dash_board(frame,hand,action):
     return vol,pitch,speed
 
 def main():
-    #global volume, pitch_shift_steps, speed_rate,is_playing,block_size
-
     last_update = time.time()
     update_interval = 0.2  # seconds
 
     # Start audio system in vision-only control mode
     threading.Thread(target=audio_processing.start_audio_system, daemon=True).start()
-    #threading.Thread(target=audio_processing.control_audio_vision, daemon=True).start()
-
+    
     # Start audio output
     cap=cv2.VideoCapture(0)
     with mp_hands.Hands(min_detection_confidence=0.8,min_tracking_confidence=0.5) as hands :
@@ -241,7 +238,6 @@ def main():
             #Convert RGB back to BGR
             image=cv2.cvtColor(frame_rgb,cv2.COLOR_RGB2BGR)
 
-            print(results)
             #Rendering results 
             # Color in BGR in DrawingSpec 
             if results.multi_hand_landmarks:
@@ -249,66 +245,69 @@ def main():
                     mp_drawing.draw_landmarks(image,hand,mp_hands.HAND_CONNECTIONS,
                                                 mp_drawing.DrawingSpec(color=(255,255,120), thickness=2, circle_radius=4),
                                                     mp_drawing.DrawingSpec(color=(255,76,134), thickness=2, circle_radius=2))
+                    
+                    new_volume=shared_data.volume
+                    new_pitch=shared_data.pitch_shift_steps
+                    new_speed=shared_data.speed_rate
+                    new_playing=shared_data.is_playing
                         
                         #Render Left or right hand label
-                    if get_hand_label(num, hand, results,width,height):
+                    if get_hand_label(num, hand, results,width,height) and len(results.multi_hand_landmarks)==2:
                         text, coord = get_hand_label(num, hand, results,width,height)
                         cv2.putText(image, text, coord, cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2,cv2.LINE_AA)
-                        name_hand=text[0]
+                        name_hand=text.split()[0]  # Gets "Left" or "Right"
                         print(name_hand)
+                        now=time.time()
 
                         #use left hand for audio player
                         if name_hand=="Left":
                             t=detection.control_audio_player(hand)
                             if t=="Pause":
-                                if time.time() - last_update > update_interval:
-                                    with shared_data.param_lock:
-                                        shared_data.is_playing = False
+                                with shared_data.param_lock:
+                                    shared_data.is_playing = False
+                                new_playing=False
                             if t=="Play":
-                                if time.time() - last_update > update_interval:
-                                    with shared_data.param_lock:
-                                        shared_data.is_playing = True
+                                with shared_data.param_lock:
+                                    shared_data.is_playing = True
+                                new_playing=True
                             print_message(image,t,1)
-                            control_audio_vision(shared_data.volume,shared_data.pitch_shift_steps,shared_data.speed_rate,shared_data.is_playing)
-                            last_update = time.time()
 
                         #use right hand for audio controller
                         if name_hand=="Right":
-                            now=time.time()
                             draw_controller(image,hand,landmark_id)
                             action=detection.get_actions(hand)
                             print_message(image,action,2)
                             new_volume,new_pitch,new_speed=handle_dash_board(image,hand,action)
-                            if now - last_update > update_interval:
-                                control_audio_vision(new_volume,new_pitch,new_speed,shared_data.is_playing)
-                            last_update = time.time()
+
                     #if unique hand use it for controller        
-                    if len(results.multi_hand_landmarks)==1:
+                    elif len(results.multi_hand_landmarks)==1:
                         now=time.time()
                         draw_controller(image,hand,landmark_id)
                         action=detection.get_actions(hand)
                         print_message(image,action,2)
                         new_volume,new_pitch,new_speed=handle_dash_board(image,hand,action)
-                        if now - last_update > update_interval:
-                            control_audio_vision(new_volume,new_pitch,new_speed,shared_data.is_playing)
-                        last_update = time.time()
+                        
 
                     #if too much hands
-                    if len(results.multi_hand_landmarks)>2:
+                    elif len(results.multi_hand_landmarks)>2:
                         txt="Too much hands on screen"
                         cv2.putText(image, txt,(10,30), cv2.FONT_HERSHEY_SIMPLEX,1,(0,0,255),2,cv2.LINE_AA)
-                
-                with shared_data.param_lock:
-                    is_playing = shared_data.is_playing
+                    
+                    if now - last_update > update_interval:
+                        control_audio_vision(new_volume,new_pitch,new_speed,new_playing)
+                        last_update = time.time()
                 print(f"Volume={shared_data.volume:.2f}, Pitch steps={shared_data.pitch_shift_steps}, Speed={shared_data.speed_rate:.2f}, isPlaying={shared_data.is_playing}")
+            
+            
             cv2.imshow("AIR Music Controller",image)
 
-            if cv2.waitKey(10) & 0xFF == ord('q'):
+            key = cv2.waitKey(10) & 0xFF
+            if key == ord('q'):
                 break
-
-            elif cv2.waitKey(10) & 0xFF == ord('p'):
+            elif key == ord('p'):
                 with shared_data.param_lock:
                     shared_data.is_playing = not shared_data.is_playing
+                control_audio_vision(shared_data.volume,shared_data.pitch_shift_steps,shared_data.speed_rate,shared_data.is_playing)
 
         cap.release()
         cv2.destroyAllWindows()
@@ -316,9 +315,9 @@ def main():
 
         with shared_data.param_lock:
             shared_data.is_playing = False  # Graceful shutdown
+        control_audio_vision(shared_data.volume,shared_data.pitch_shift_steps,shared_data.speed_rate,shared_data.is_playing)
 
-
-        
+    
     # Keep main alive
     """except KeyboardInterrupt:
         audio_processing.stop_stream()

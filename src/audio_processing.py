@@ -29,11 +29,13 @@ def background_processing():
     fade_out = np.sqrt(1.0 - fade)
 
     previous_tail = None
+    
 
     while True:
         with shared_data.param_lock:
             if not shared_data.is_playing:
-                break
+                time.sleep(0.1)  # Sleep a bit to reduce CPU usage while paused
+                continue # Skip processing until play resumes
             vol = shared_data.volume
             pitch_shift = shared_data.pitch_shift_steps
             speed = shared_data.speed_rate
@@ -73,6 +75,13 @@ def background_processing():
                 pass
 
 def audio_callback(outdata, frames, time_info, status):
+    with shared_data.param_lock:
+        is_playing = shared_data.is_playing
+
+    if not is_playing:
+        outdata[:] = np.zeros((frames, 1))
+        return
+
     try:
         block = processed_buffer.get_nowait()
     except queue.Empty:
@@ -82,6 +91,7 @@ def audio_callback(outdata, frames, time_info, status):
     if block.ndim == 1:
         block = block[:, np.newaxis]
     outdata[:] = block
+
 
 def control_audio_keyboard():
     while True:
@@ -152,6 +162,7 @@ def start_audio_system(with_control=True):
             with shared_data.param_lock:
                 if not shared_data.is_playing:
                     break
+                
             time.sleep(0.1)
     except KeyboardInterrupt:
         stop_stream()

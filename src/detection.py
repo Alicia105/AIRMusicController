@@ -142,7 +142,6 @@ def control_audio_player(hand):
         t="Equalizer"
     return t
 
-
 def handleVolume(hand):
     if(isThumbBent(hand) and not isPalmFingerBent(hand,name="index") and isPalmFingerBent(hand,name="middle") and isPalmFingerBent(hand,name="ring") and isPalmFingerBent(hand,name="pinky")):
         return True
@@ -158,13 +157,12 @@ def handleSpeed(hand):
         return True
     return False
 
-
 def get_actions(hand):
     t="None"
     if handleVolume(hand):
         t="Volume"
-    if handleSpeed(hand):
+    elif handleSpeed(hand):
         t="Speed"
-    if handlePitch(hand):
+    elif handlePitch(hand):
         t="Pitch"
     return t

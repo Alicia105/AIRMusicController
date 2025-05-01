@@ -6,3 +6,7 @@ audio/*.mp3
 src/__pycache__/audio_processing.cpython-312.pyc
 src/__pycache__/shared_data.cpython-312.pyc
 src/n.py
+src/main.py
+requirements.txt
+README.md
+README.md

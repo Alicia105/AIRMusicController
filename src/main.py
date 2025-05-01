@@ -6,6 +6,26 @@ import detection
 import shared_data
 import time
 from audio_processing import start_audio_system, control_audio_vision
+from collections import deque
+
+
+# Gesture memory for debouncing (avoiding rapid gesture switches)
+gesture_memory = {'last': 'None', 'count': 0}
+player_memory = {'last': 'None', 'count': 0}
+
+# Index finger Y smoothing for volume/pitch/speed control
+smoothed_y = deque(maxlen=5)
+
+# Smoothing index finger X
+smoothed_x = deque(maxlen=5)
+
+# Define your Y-range for interpolation (you can calibrate this later)
+min_y = 0  # bottom of the screen (hand low)
+max_y = 480  # top of the screen (hand high)
+
+# Define your X-range for interpolation (you can calibrate this later)
+min_x = 0  # left of the screen (hand low)
+max_x = 640  # right of the screen (hand high)
 
 #import hands landmarks and medeiapipe hand tracking model
 mp_drawing = mp.solutions.drawing_utils
@@ -49,6 +69,9 @@ def set_graduation(image, hand, minPix, maxPix, minVal, maxVal, numGrad, selecto
     lm = hand.landmark[8]  # Index fingertip
     h, w, _ = image.shape
     x, y = int(lm.x * w), int(lm.y * h)
+
+    #x=get_stable_index_x(hand, w)
+    #y=get_stable_index_y(hand, h)
 
     # Compute increments
     incrPixel = abs(maxPix - minPix) / numGrad
@@ -214,10 +237,41 @@ def handle_dash_board(frame,hand,action):
     speed=draw_speed(frame,hand,action)
     return vol,pitch,speed
 
+# Smooth out gesture changes (only trigger if held for X frames)
+def stable_action(new_action, threshold=3):
+    global gesture_memory
+    if new_action == gesture_memory['last']:
+        gesture_memory['count'] += 1
+    else:
+        gesture_memory['last'] = new_action
+        gesture_memory['count'] = 1
+    return new_action if gesture_memory['count'] >= threshold else "None"
+
+def stable_player(new_action, threshold=3):
+    global player_memory
+    if new_action == gesture_memory['last']:
+        gesture_memory['count'] += 1
+    else:
+        gesture_memory['last'] = new_action
+        gesture_memory['count'] = 1
+    return new_action if gesture_memory['count'] >= threshold else "None"
+
+# Smooth Y-position of index fingertip to avoid jitter in control
+def get_stable_index_y(hand, image_height):
+    index_y = hand.landmark[8].y * image_height
+    smoothed_y.append(index_y)
+    return int(sum(smoothed_y) / len(smoothed_y))
+
+# Smooth X-position of index fingertip to avoid jitter in control
+def get_stable_index_x(hand, image_width):
+    index_x = hand.landmark[8].x * image_width
+    smoothed_x.append(index_x)
+    return int(sum(smoothed_x) / len(smoothed_x))
+
 def main():
     last_update = time.time()
     update_interval = 0.2  # seconds
-
+    count=0
     # Start audio system in vision-only control mode
     threading.Thread(target=start_audio_system, daemon=True).start()
     
@@ -225,6 +279,8 @@ def main():
     cap=cv2.VideoCapture(0)
     with mp_hands.Hands(min_detection_confidence=0.8,min_tracking_confidence=0.5) as hands :
         while cap.isOpened():
+            count+=1
+
             # Get index tip (id 8)
             landmark_id = 8 
 
@@ -276,6 +332,7 @@ def main():
                         #use left hand for audio player
                         if name_hand=="Left":
                             t=detection.control_audio_player(hand)
+                            #t=stable_action(t)
                             if t=="Pause":
                                 with shared_data.param_lock:
                                     shared_data.is_playing = False
@@ -290,6 +347,7 @@ def main():
                         if name_hand=="Right":
                             draw_controller(image,hand,landmark_id)
                             action=detection.get_actions(hand)
+                            #action=stable_action(action)
                             print_message(image,action,2)
                             new_volume,new_pitch,new_speed=handle_dash_board(image,hand,action)
 
@@ -298,6 +356,7 @@ def main():
                         now=time.time()
                         draw_controller(image,hand,landmark_id)
                         action=detection.get_actions(hand)
+                        #action=stable_action(action)
                         print_message(image,action,2)
                         new_volume,new_pitch,new_speed=handle_dash_board(image,hand,action)
                         
